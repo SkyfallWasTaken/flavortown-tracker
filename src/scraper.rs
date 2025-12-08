@@ -147,19 +147,25 @@ fn scrape_region(region: &Region) -> Result<ShopItems> {
     Ok(items)
 }
 
-pub fn scrape<'a>() -> Result<Vec<&'a ShopItem>> {
-    let regions = Region::VARIANTS;
+pub fn scrape() -> Result<Vec<ShopItem>> {
     let mut items: HashMap<ShopItemId, ShopItem> = HashMap::new();
-    for region in regions {
-        for region_item in region_items.iter() {
-            if let Some(item) = items.get_mut(&region_item.id) {
-                item.regions.push(region.clone());
-            } else {
-                region_item.regions = vec![region.clone()];
-                items.insert(region_item.id, region_item.clone());
+
+    for region in Region::VARIANTS {
+        let mut region_items = scrape_region(region)?;
+
+        for item in region_items.drain(..) {
+            match items.get_mut(&item.id) {
+                Some(existing) => {
+                    existing.regions.push(region.clone());
+                }
+                None => {
+                    let mut new_item = item;
+                    new_item.regions = vec![region.clone()];
+                    items.insert(new_item.id, new_item);
+                }
             }
         }
     }
-    let items = items.values().collect::<Vec<&'a ShopItem>>();
-    Ok(items.clone())
+
+    Ok(items.into_values().collect())
 }
