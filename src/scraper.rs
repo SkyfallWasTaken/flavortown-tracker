@@ -4,14 +4,14 @@ use crate::config::CONFIG;
 use color_eyre::{Result, eyre::eyre};
 use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
-use reqwest::{Url, header};
+use reqwest::{StatusCode, Url, header};
 use scraper::{Html, Selector};
 use strum::VariantArray;
 use strum_macros::{Display, VariantArray};
 
 static CLIENT: Lazy<Client> = Lazy::new(|| {
     let mut headers = header::HeaderMap::new();
-    headers.insert(header::COOKIE, "".parse().unwrap());
+    headers.insert(header::COOKIE, CONFIG.cookie.parse().unwrap());
     Client::builder()
         .user_agent(&CONFIG.user_agent)
         .default_headers(headers)
@@ -75,6 +75,7 @@ fn scrape_region(region: &Region) -> Result<ShopItems> {
         .query(&[("region", region.code())])
         .send()?
         .error_for_status()?;
+    assert_eq!(res.status(), StatusCode::OK);
     let html = res.text()?;
     let document = Html::parse_document(&html);
 
