@@ -71,14 +71,7 @@ pub struct ShopItem {
 }
 
 fn scrape_region(region: &Region, csrf_token: &String) -> Result<ShopItems> {
-    let mut params = HashMap::new();
-    params.insert("region", region.code());
-    CLIENT
-        .patch(CONFIG.base_url.join("shop/update_region")?)
-        .header("X-CSRF-Token", csrf_token)
-        .form(&params)
-        .send()?
-        .error_for_status()?;
+    set_region(region, csrf_token)?;
 
     let res = CLIENT
         .get(CONFIG.base_url.join("shop")?)
@@ -146,29 +139,10 @@ fn scrape_region(region: &Region, csrf_token: &String) -> Result<ShopItems> {
 
 pub fn scrape() -> Result<Vec<ShopItem>> {
     let mut items: HashMap<ShopItemId, ShopItem> = HashMap::new();
-
-    let res = CLIENT
-        .get(CONFIG.base_url.join("shop")?)
-        .send()?
-        .error_for_status()?;
-    assert_eq!(res.status(), StatusCode::OK);
-    let html = res.text()?;
-    let document = Html::parse_document(&html);
-    let selector = Selector::parse("meta[name=\"csrf-token\"]").unwrap();
-    let csrf_token = document
-        .select(&selector)
-        .next()
-        .ok_or_else(|| eyre!("Failed to find csrf-token"))?
-        .attr("content")
-        .unwrap()
-        .parse::<String>()
-        .unwrap();
-    dbg!(&csrf_token);
+    let csrf_token = get_csrf_token()?;
 
     for region in Region::VARIANTS {
-        let region_items = scrape_region(region, &csrf_token)?;
-
-        for item in region_items {
+        for item in scrape_region(region, &csrf_token)? {
             items
                 .entry(item.id)
                 .and_modify(|e| e.regions.push(region.clone()))
@@ -191,4 +165,32 @@ fn select_one<'a>(
         .select(&Selector::parse(selector).unwrap())
         .next()
         .ok_or_else(|| eyre!("missing element: {}", selector))
+}
+
+fn get_csrf_token() -> Result<String> {
+    let html = CLIENT
+        .get(CONFIG.base_url.join("shop")?)
+        .send()?
+        .error_for_status()?
+        .text()?;
+
+    let document = Html::parse_document(&html);
+    let csrf_token = document
+        .select(&Selector::parse("meta[name=\"csrf-token\"]").unwrap())
+        .next()
+        .and_then(|e| e.attr("content"))
+        .ok_or_else(|| eyre!("Failed to find csrf-token"))?;
+    Ok(csrf_token.into())
+}
+
+fn set_region(region: &Region, csrf_token: &String) -> Result<()> {
+    let mut params = HashMap::new();
+    params.insert("region", region.code());
+    CLIENT
+        .patch(CONFIG.base_url.join("shop/update_region")?)
+        .header("X-CSRF-Token", csrf_token)
+        .form(&params)
+        .send()?
+        .error_for_status()?;
+    Ok(())
 }
