@@ -20,7 +20,7 @@ static CLIENT: Lazy<Client> = Lazy::new(|| {
 });
 
 #[derive(Display, Debug, VariantArray, Clone)]
-enum Region {
+pub enum Region {
     #[strum(to_string = "USA")]
     UnitedStates,
 
@@ -44,15 +44,15 @@ enum Region {
 }
 
 impl Region {
-    pub fn code(&self) -> &'static str {
+    pub const fn code(&self) -> &'static str {
         match self {
-            Region::UnitedStates => "US",
-            Region::Europe => "EU",
-            Region::UnitedKingdom => "UK",
-            Region::India => "IN",
-            Region::Canada => "CA",
-            Region::Australia => "AU",
-            Region::Global => "XX",
+            Self::UnitedStates => "US",
+            Self::Europe => "EU",
+            Self::UnitedKingdom => "UK",
+            Self::India => "IN",
+            Self::Canada => "CA",
+            Self::Australia => "AU",
+            Self::Global => "XX",
         }
     }
 }
@@ -152,9 +152,9 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
     let mut items: HashMap<ShopItemId, ShopItem> = HashMap::new();
 
     for region in Region::VARIANTS {
-        let mut region_items = scrape_region(region)?;
+        let region_items = scrape_region(region)?;
 
-        for item in region_items.drain(..) {
+        for item in region_items.into_iter() {
             match items.get_mut(&item.id) {
                 Some(existing) => {
                     existing.regions.push(region.clone());
