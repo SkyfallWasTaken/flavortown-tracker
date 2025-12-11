@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::config::CONFIG;
 use color_eyre::{Result, eyre::eyre};
@@ -20,7 +21,7 @@ static CLIENT: Lazy<Client> = Lazy::new(|| {
         .expect("Failed to build scraping client")
 });
 
-#[derive(Display, Debug, VariantArray, Clone)]
+#[derive(Display, Debug, VariantArray, Clone, Hash, PartialEq, Eq)]
 pub enum Region {
     #[strum(to_string = "United States")]
     UnitedStates,
@@ -59,10 +60,9 @@ pub type ShopItemId = usize;
 pub struct ShopItem {
     pub title: String,
     pub description: String,
-    pub price: u32,
+    pub prices: HashMap<Region, u32>,
     pub image_url: Url,
     pub id: ShopItemId,
-    pub regions: Vec<Region>,
 }
 
 fn select_one<'a>(element: &'a ElementRef, selector: &str) -> Result<ElementRef<'a>> {
@@ -72,7 +72,7 @@ fn select_one<'a>(element: &'a ElementRef, selector: &str) -> Result<ElementRef<
         .ok_or_else(|| eyre!("missing element: {}", selector))
 }
 
-fn parse_shop_item(element: ElementRef) -> Result<ShopItem> {
+fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
     let title = select_one(&element, "h4")?.inner_html();
     let description = select_one(&element, "div.shop-item-card__description > p")?.inner_html();
     let price: u32 = select_one(&element, "span.shop-item-card__price")?
@@ -91,13 +91,15 @@ fn parse_shop_item(element: ElementRef) -> Result<ShopItem> {
         .ok_or_else(|| eyre!("missing item id"))?
         .parse()?;
 
+    let mut prices = HashMap::new();
+    prices.insert(region.clone(), price);
+
     Ok(ShopItem {
         title,
         description,
         id,
-        price,
         image_url,
-        regions: Vec::new(),
+        prices,
     })
 }
 
@@ -150,7 +152,7 @@ fn scrape_region(region: &Region, csrf_token: &str) -> Result<ShopItems> {
     // step 2: parse all shop items
     document
         .select(&Selector::parse(".shop-item-card").unwrap())
-        .map(parse_shop_item)
+        .map(|element_ref| parse_shop_item(element_ref, region))
         .collect()
 }
 
@@ -162,11 +164,11 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
         for item in scrape_region(region, &csrf_token)? {
             items
                 .entry(item.id)
-                .and_modify(|e| e.regions.push(region.clone()))
-                .or_insert_with(|| ShopItem {
-                    regions: vec![region.clone()],
-                    ..item
-                });
+                .and_modify(|e| {
+                    e.prices
+                        .insert(region.clone(), *item.prices.get(region).unwrap());
+                })
+                .or_insert(item);
         }
     }
 
