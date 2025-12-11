@@ -2,26 +2,35 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use crate::config::CONFIG;
+use crate::storage::{CDN_CACHE_DB, upload_to_cdn};
 use color_eyre::{Result, eyre::eyre};
 use once_cell::sync::Lazy;
+use rayon::prelude::*;
 use reqwest::blocking::Client;
 use reqwest::{StatusCode, Url, header, redirect};
 use scraper::{ElementRef, Html, Selector};
+use serde::{Deserialize, Serialize};
 use strum::VariantArray;
 use strum_macros::{Display, VariantArray};
 
-static CLIENT: Lazy<Client> = Lazy::new(|| {
+pub static CLIENT: Lazy<Client> = Lazy::new(|| {
     let mut headers = header::HeaderMap::new();
-    headers.insert(header::COOKIE, CONFIG.cookie.parse().unwrap());
+    headers.insert(
+        header::COOKIE,
+        CONFIG
+            .cookie
+            .parse()
+            .expect("cookie parsing failed - check your COOKIE env var"),
+    );
     Client::builder()
         .user_agent(&CONFIG.user_agent)
         .default_headers(headers)
         .redirect(redirect::Policy::none())
         .build()
-        .expect("Failed to build scraping client")
+        .expect("failed to build scraping client")
 });
 
-#[derive(Display, Debug, VariantArray, Clone, Hash, PartialEq, Eq)]
+#[derive(Display, Debug, VariantArray, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Region {
     #[strum(to_string = "United States")]
     UnitedStates,
@@ -56,12 +65,14 @@ impl Region {
 pub type ShopItems = Vec<ShopItem>;
 pub type ShopItemId = usize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord)]
 pub struct ShopItem {
     pub title: String,
     pub description: String,
     pub prices: HashMap<Region, u32>,
     pub image_url: Url,
+
+    pub image_id: usize,
     pub id: ShopItemId,
 }
 
@@ -86,6 +97,7 @@ fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
         .attr("src")
         .ok_or_else(|| eyre!("missing image src"))?
         .parse()?;
+    let image_id = crate::rails::get_rails_blob_id(&image_url)?;
     let id = element
         .attr("data-shop-id")
         .ok_or_else(|| eyre!("missing item id"))?
@@ -99,6 +111,7 @@ fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
         description,
         id,
         image_url,
+        image_id,
         prices,
     })
 }
@@ -165,12 +178,22 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
             items
                 .entry(item.id)
                 .and_modify(|e| {
-                    e.prices
-                        .insert(region.clone(), *item.prices.get(region).unwrap());
+                    e.prices.insert(region.clone(), item.prices[region]);
                 })
                 .or_insert(item);
         }
     }
 
-    Ok(items.into_values().collect())
+    items
+        .par_iter_mut()
+        .try_for_each(|(_, item)| -> Result<()> {
+            item.image_url = upload_to_cdn(item.image_id, &item.image_url.clone())?;
+            Ok(())
+        })?;
+
+    CDN_CACHE_DB.flush()?;
+
+    let mut items = items.into_values().collect::<ShopItems>();
+    items.sort_by_key(|item| item.id);
+    Ok(items)
 }

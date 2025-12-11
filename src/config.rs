@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use color_eyre::eyre::Context;
 use once_cell::sync::Lazy;
 use reqwest::Url;
@@ -10,6 +12,8 @@ pub struct Config {
     pub user_agent: String,
     #[serde(default = "default_base_url")]
     pub base_url: Url,
+    #[serde(default = "default_storage_path")]
+    pub storage_path: PathBuf,
 }
 
 fn default_user_agent() -> String {
@@ -18,6 +22,10 @@ fn default_user_agent() -> String {
 
 fn default_base_url() -> Url {
     Url::parse("https://flavortown.hackclub.com/").unwrap()
+}
+
+fn default_storage_path() -> PathBuf {
+    std::env::current_dir().unwrap().join("flavortown-storage")
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| {
