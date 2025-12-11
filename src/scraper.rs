@@ -65,7 +65,7 @@ impl Region {
 pub type ShopItems = Vec<ShopItem>;
 pub type ShopItemId = usize;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 pub struct ShopItem {
     pub title: String,
     pub description: String,
