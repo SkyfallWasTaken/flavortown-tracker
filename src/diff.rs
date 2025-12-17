@@ -144,22 +144,33 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
     ];
 
     if old.image_url != new.image_url {
+        // Use context block to display old and new images side by side
+        let old_image = SlackBlockImageElement::new(
+            old.image_url.clone().into(),
+            format!("Old image for {}", new.title),
+        );
+        let new_image = SlackBlockImageElement::new(
+            new.image_url.clone().into(),
+            format!("New image for {}", new.title),
+        );
+        blocks.push(
+            SlackContextBlock::new(vec![
+                SlackContextBlockElement::MarkDown(md!("*Old:*")),
+                SlackContextBlockElement::Image(old_image),
+                SlackContextBlockElement::MarkDown(md!("→ *New:*")),
+                SlackContextBlockElement::Image(new_image),
+            ])
+            .into(),
+        );
+    } else {
         blocks.push(
             SlackImageBlock::new(
-                old.image_url.clone().into(),
-                format!("Old image for {}", new.title),
+                new.image_url.clone().into(),
+                format!("Image for {}", new.title),
             )
             .into(),
         );
     }
-
-    blocks.push(
-        SlackImageBlock::new(
-            new.image_url.clone().into(),
-            format!("New image for {}", new.title),
-        )
-        .into(),
-    );
     blocks
 }
 
@@ -213,49 +224,94 @@ pub fn compute_diff(old_items: &ShopItems, new_items: &ShopItems) -> ItemDiff {
     diff
 }
 
+// Slack's maximum block limit per message
+const SLACK_MAX_BLOCKS: usize = 50;
+
 pub fn send_webhook_notifications(diff: &ItemDiff) -> Result<()> {
     use crate::scraper::CLIENT;
 
-    let mut all_blocks: Vec<SlackBlock> = Vec::new();
+    // Collect blocks for each item separately so we can chunk them properly
+    let mut item_block_groups: Vec<Vec<SlackBlock>> = Vec::new();
 
     for item in &diff.new_items {
         info!("Sending notification for new item: {}", item.title);
-        all_blocks.extend(render_new_item(item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_new_item(item));
     }
 
     for (old_item, new_item) in &diff.updated_items {
         info!("Sending notification for updated item: {}", new_item.title);
-        all_blocks.extend(render_updated_item(old_item, new_item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_updated_item(old_item, new_item));
     }
 
     for item in &diff.deleted_items {
         info!("Sending notification for deleted item: {}", item.title);
-        all_blocks.extend(render_deleted_item(item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_deleted_item(item));
     }
 
-    if matches!(all_blocks.last(), Some(SlackBlock::Divider(_))) {
-        all_blocks.pop();
+    let summary_text = format!(
+        "Shop update: {} new, {} updated, {} removed",
+        diff.new_items.len(),
+        diff.updated_items.len(),
+        diff.deleted_items.len()
+    );
+
+    // Chunk item groups into messages that fit within the block limit
+    let mut messages: Vec<Vec<SlackBlock>> = Vec::new();
+    let mut current_message_blocks: Vec<SlackBlock> = Vec::new();
+
+    for item_blocks in item_block_groups {
+        // +1 for divider between items (if not first item in message)
+        let blocks_needed = if current_message_blocks.is_empty() {
+            item_blocks.len()
+        } else {
+            item_blocks.len() + 1 // +1 for divider
+        };
+
+        // Check if adding this item would exceed the limit
+        // Reserve 1 block for channel ping in the last message
+        if !current_message_blocks.is_empty()
+            && current_message_blocks.len() + blocks_needed > SLACK_MAX_BLOCKS - 1
+        {
+            messages.push(current_message_blocks);
+            current_message_blocks = Vec::new();
+        }
+
+        // Add divider between items within the same message
+        if !current_message_blocks.is_empty() {
+            current_message_blocks.push(SlackDividerBlock::new().into());
+        }
+
+        current_message_blocks.extend(item_blocks);
     }
 
-    all_blocks.extend(render_channel_ping());
+    // Add the remaining blocks as the last message
+    if !current_message_blocks.is_empty() {
+        messages.push(current_message_blocks);
+    }
 
-    let payload = SlackMessageContent::new()
-        .with_text(format!(
-            "Shop update: {} new, {} updated, {} removed",
-            diff.new_items.len(),
-            diff.updated_items.len(),
-            diff.deleted_items.len()
-        ))
-        .with_blocks(all_blocks);
+    // Add channel ping to the last message
+    if let Some(last_message) = messages.last_mut() {
+        last_message.extend(render_channel_ping());
+    }
 
-    CLIENT
-        .post(CONFIG.webhook_url.clone())
-        .json(&payload)
-        .send()?
-        .error_for_status()?;
+    // Send all messages
+    for (i, blocks) in messages.iter().enumerate() {
+        let text = if messages.len() == 1 {
+            summary_text.clone()
+        } else {
+            format!("{} (part {}/{})", summary_text, i + 1, messages.len())
+        };
+
+        let payload = SlackMessageContent::new()
+            .with_text(text)
+            .with_blocks(blocks.clone());
+
+        CLIENT
+            .post(CONFIG.webhook_url.clone())
+            .json(&payload)
+            .send()?
+            .error_for_status()?;
+    }
 
     info!("Successfully sent webhook notifications");
     Ok(())
