@@ -61,6 +61,18 @@ impl Region {
             Self::Global => "XX",
         }
     }
+
+    pub const fn flag(&self) -> &'static str {
+        match self {
+            Self::UnitedStates => ":flag-us:",
+            Self::Europe => ":flag-eu:",
+            Self::UnitedKingdom => ":flag-gb:",
+            Self::India => ":flag-in:",
+            Self::Canada => ":flag-ca:",
+            Self::Australia => ":flag-au:",
+            Self::Global => ":earth_americas:",
+        }
+    }
 }
 
 pub type ShopItems = Vec<ShopItem>;

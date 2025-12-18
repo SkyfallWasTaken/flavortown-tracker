@@ -14,25 +14,6 @@ const EMOJI_TRASH: &str = ":win10-trash:";
 const EMOJI_STAR: &str = ":star:";
 const EMOJI_ROBOT: &str = ":robot_face:";
 
-fn format_prices(prices: &HashMap<Region, u32>) -> String {
-    let price_entries: Vec<_> = prices.iter().collect();
-
-    match price_entries.as_slice() {
-        [(region, price)] => format!("{price} ({region})"),
-        entries
-            if entries.len() == Region::VARIANTS.len()
-                && entries.iter().all(|(_, p)| **p == *entries[0].1) =>
-        {
-            format!("{} (Rest of World)", entries[0].1)
-        }
-        entries => entries
-            .iter()
-            .map(|(r, p)| format!("{r} {p}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    }
-}
-
 fn prices_changed(old: &HashMap<Region, u32>, new: &HashMap<Region, u32>) -> bool {
     old.len() != new.len() || old.iter().any(|(r, p)| new.get(r) != Some(p))
 }
@@ -46,11 +27,30 @@ fn escape_markdown(text: &str) -> String {
         .collect()
 }
 
+fn format_prices_with_flags(prices: &HashMap<Region, u32>) -> String {
+    let price_entries: Vec<_> = prices.iter().collect();
+
+    match price_entries.as_slice() {
+        [(region, price)] => format!("{} {price}", region.flag()),
+        entries
+            if entries.len() == Region::VARIANTS.len()
+                && entries.iter().all(|(_, p)| **p == *entries[0].1) =>
+        {
+            format!(":earth_americas: {}", entries[0].1)
+        }
+        entries => entries
+            .iter()
+            .map(|(r, p)| format!("{} {p}", r.flag()))
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
 fn item_header(emoji: &str, item: &ShopItem, prices: &HashMap<Region, u32>) -> String {
     format!(
         "{emoji} {} ({EMOJI_SHELLS} {})",
         item.title,
-        format_prices(prices)
+        format_prices_with_flags(prices)
     )
 }
 
@@ -108,11 +108,11 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
     let price = if prices_changed(&old.prices, &new.prices) {
         format!(
             "{} → {}",
-            format_prices(&old.prices),
-            format_prices(&new.prices)
+            format_prices_with_flags(&old.prices),
+            format_prices_with_flags(&new.prices)
         )
     } else {
-        format_prices(&new.prices)
+        format_prices_with_flags(&new.prices)
     };
 
     let description = match (old.description.is_empty(), new.description.is_empty()) {
