@@ -7,7 +7,7 @@ use log::{debug, info};
 use slack_morphism::prelude::*;
 use strum::VariantArray;
 
-const EMOJI_SHELLS: &str = ":shells:";
+const EMOJI_COOKIES: &str = ":cookie:";
 const EMOJI_TROLLEY: &str = ":tw_shopping_trolley:";
 const EMOJI_NEW: &str = ":new:";
 const EMOJI_TRASH: &str = ":win10-trash:";
@@ -52,7 +52,7 @@ fn item_header(emoji: &str, title: &str) -> String {
 
 fn format_price_line(prices: &HashMap<Region, u32>) -> String {
     format!(
-        "*Price:* {EMOJI_SHELLS} {}",
+        "*Price:* {EMOJI_COOKIES} {}",
         format_prices_with_flags(prices)
     )
 }
@@ -115,7 +115,7 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
 
     let price_line = if prices_changed(&old.prices, &new.prices) {
         format!(
-            "*Price:* {EMOJI_SHELLS} {} → {}",
+            "*Price:* {EMOJI_COOKIES} {} → {}",
             format_prices_with_flags(&old.prices),
             format_prices_with_flags(&new.prices)
         )
