@@ -21,5 +21,6 @@ slack-morphism = "2.17.0"
 sled = "0.34.7"
 strum = "0.27.2"
 strum_macros = "0.27.2"
+sentry = "0.38"
 time-format = "1.2.2"
 

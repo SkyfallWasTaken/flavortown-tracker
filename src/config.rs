@@ -15,6 +15,7 @@ pub struct Config {
     pub base_url: Url,
     #[serde(default = "default_storage_path")]
     pub storage_path: PathBuf,
+    pub sentry_dsn: Option<String>,
 }
 
 fn default_user_agent() -> String {

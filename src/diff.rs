@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::config::CONFIG;
 use crate::scraper::{Region, ShopItem, ShopItems};
 use color_eyre::Result;
-use log::info;
+use log::{debug, info};
 use slack_morphism::prelude::*;
 use strum::VariantArray;
 
@@ -213,49 +213,80 @@ pub fn compute_diff(old_items: &ShopItems, new_items: &ShopItems) -> ItemDiff {
     diff
 }
 
-pub fn send_webhook_notifications(diff: &ItemDiff) -> Result<()> {
+const MAX_BLOCKS_PER_MESSAGE: usize = 50;
+
+fn send_blocks(blocks: Vec<SlackBlock>, fallback_text: &str) -> Result<()> {
     use crate::scraper::CLIENT;
 
-    let mut all_blocks: Vec<SlackBlock> = Vec::new();
+    let payload = SlackMessageContent::new()
+        .with_text(fallback_text.to_string())
+        .with_blocks(blocks);
+
+    debug!(
+        "Sending payload: {}",
+        serde_json::to_string_pretty(&payload).unwrap_or_default()
+    );
+
+    let response = CLIENT
+        .post(CONFIG.webhook_url.clone())
+        .json(&payload)
+        .send()?;
+
+    let status = response.status();
+    let body = response.text().unwrap_or_default();
+    debug!("Response status: {}, body: {}", status, body);
+    if !status.is_success() {
+        return Err(color_eyre::eyre::eyre!("Slack API error {}: {}", status, body));
+    }
+
+    Ok(())
+}
+
+pub fn send_webhook_notifications(diff: &ItemDiff) -> Result<()> {
+    let mut item_block_groups: Vec<Vec<SlackBlock>> = Vec::new();
 
     for item in &diff.new_items {
         info!("Sending notification for new item: {}", item.title);
-        all_blocks.extend(render_new_item(item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_new_item(item));
     }
 
     for (old_item, new_item) in &diff.updated_items {
         info!("Sending notification for updated item: {}", new_item.title);
-        all_blocks.extend(render_updated_item(old_item, new_item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_updated_item(old_item, new_item));
     }
 
     for item in &diff.deleted_items {
         info!("Sending notification for deleted item: {}", item.title);
-        all_blocks.extend(render_deleted_item(item));
-        all_blocks.push(SlackDividerBlock::new().into());
+        item_block_groups.push(render_deleted_item(item));
     }
 
-    if matches!(all_blocks.last(), Some(SlackBlock::Divider(_))) {
-        all_blocks.pop();
+    let fallback_text = format!(
+        "Shop update: {} new, {} updated, {} removed",
+        diff.new_items.len(),
+        diff.updated_items.len(),
+        diff.deleted_items.len()
+    );
+
+    let mut current_blocks: Vec<SlackBlock> = Vec::new();
+
+    for (i, group) in item_block_groups.into_iter().enumerate() {
+        let group_size = group.len() + 1; // +1 for divider
+
+        if !current_blocks.is_empty()
+            && current_blocks.len() + group_size > MAX_BLOCKS_PER_MESSAGE - 1
+        {
+            send_blocks(current_blocks, &fallback_text)?;
+            current_blocks = Vec::new();
+        }
+
+        current_blocks.extend(group);
+        if i < diff.new_items.len() + diff.updated_items.len() + diff.deleted_items.len() - 1 {
+            current_blocks.push(SlackDividerBlock::new().into());
+        }
     }
 
-    all_blocks.extend(render_channel_ping());
-
-    let payload = SlackMessageContent::new()
-        .with_text(format!(
-            "Shop update: {} new, {} updated, {} removed",
-            diff.new_items.len(),
-            diff.updated_items.len(),
-            diff.deleted_items.len()
-        ))
-        .with_blocks(all_blocks);
-
-    CLIENT
-        .post(CONFIG.webhook_url.clone())
-        .json(&payload)
-        .send()?
-        .error_for_status()?;
+    current_blocks.extend(render_channel_ping());
+    send_blocks(current_blocks, &fallback_text)?;
 
     info!("Successfully sent webhook notifications");
     Ok(())

@@ -12,6 +12,16 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     env_logger::init();
 
+    let _sentry_guard = config::CONFIG.sentry_dsn.as_ref().map(|dsn| {
+        sentry::init((
+            dsn.as_str(),
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                ..Default::default()
+            },
+        ))
+    });
+
     info!("Starting scrape job...");
     let items = scraper::scrape()?;
     let old_snap = storage::load_latest_snapshot()?;
