@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
@@ -13,10 +14,15 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY . .
-RUN cargo build --release --locked --bin flavortown_tracker
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked --bin flavortown_tracker && \
+    cp /app/target/release/flavortown_tracker /app/flavortown_tracker
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -26,7 +32,7 @@ RUN useradd -u 1000 -m appuser
 USER appuser
 WORKDIR /app
 
-COPY --from=builder /app/target/release/flavortown_tracker /app/flavortown_tracker
+COPY --from=builder /app/flavortown_tracker /app/flavortown_tracker
 COPY --chown=appuser:appuser scripts/run-every-5min.sh /app/run-every-5min.sh
 RUN chmod +x /app/run-every-5min.sh
 
