@@ -46,10 +46,13 @@ fn format_prices_with_flags(prices: &HashMap<Region, u32>) -> String {
     }
 }
 
-fn item_header(emoji: &str, item: &ShopItem, prices: &HashMap<Region, u32>) -> String {
+fn item_header(emoji: &str, title: &str) -> String {
+    format!("{emoji} {title}")
+}
+
+fn format_price_line(prices: &HashMap<Region, u32>) -> String {
     format!(
-        "{emoji} {} ({EMOJI_SHELLS} {})",
-        item.title,
+        "*Price:* {EMOJI_SHELLS} {}",
         format_prices_with_flags(prices)
     )
 }
@@ -68,13 +71,14 @@ fn buy_button(url: &impl ToString) -> String {
 
 fn render_new_item(item: &ShopItem) -> Vec<SlackBlock> {
     let section_text = format!(
-        "{}*Stock:* Unlimited\n\n{}",
+        "{}{}\n*Stock:* Unlimited\n\n{}",
         item_description(&item.description),
+        format_price_line(&item.prices),
         buy_button(&item.buy_link())
     );
 
     vec![
-        SlackHeaderBlock::new(pt!(item_header(EMOJI_NEW, item, &item.prices))).into(),
+        SlackHeaderBlock::new(pt!(item_header(EMOJI_NEW, &item.title))).into(),
         SlackSectionBlock::new().with_text(md!(section_text)).into(),
         SlackImageBlock::new(
             item.image_url.clone().into(),
@@ -85,11 +89,15 @@ fn render_new_item(item: &ShopItem) -> Vec<SlackBlock> {
 }
 
 fn render_deleted_item(item: &ShopItem) -> Vec<SlackBlock> {
+    let section_text = format!(
+        "{}{}\n",
+        item_description(&item.description),
+        format_price_line(&item.prices)
+    );
+
     vec![
-        SlackHeaderBlock::new(pt!(item_header(EMOJI_TRASH, item, &item.prices))).into(),
-        SlackSectionBlock::new()
-            .with_text(md!(item_description(&item.description)))
-            .into(),
+        SlackHeaderBlock::new(pt!(item_header(EMOJI_TRASH, &item.title))).into(),
+        SlackSectionBlock::new().with_text(md!(section_text)).into(),
         SlackImageBlock::new(
             item.image_url.clone().into(),
             format!("Image for {}", item.title),
@@ -105,14 +113,14 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
         new.title.clone()
     };
 
-    let price = if prices_changed(&old.prices, &new.prices) {
+    let price_line = if prices_changed(&old.prices, &new.prices) {
         format!(
-            "{} → {}",
+            "*Price:* {EMOJI_SHELLS} {} → {}",
             format_prices_with_flags(&old.prices),
             format_prices_with_flags(&new.prices)
         )
     } else {
-        format_prices_with_flags(&new.prices)
+        format_price_line(&new.prices)
     };
 
     let description = match (old.description.is_empty(), new.description.is_empty()) {
@@ -134,12 +142,12 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
     };
 
     let section_text = format!(
-        "{description}*Stock:* Unlimited\n\n{}",
+        "{description}{price_line}\n*Stock:* Unlimited\n\n{}",
         buy_button(&new.buy_link())
     );
 
     let mut blocks = vec![
-        SlackHeaderBlock::new(pt!(format!("{title} ({EMOJI_SHELLS} {price})"))).into(),
+        SlackHeaderBlock::new(pt!(title)).into(),
         SlackSectionBlock::new().with_text(md!(section_text)).into(),
     ];
 
@@ -234,9 +242,12 @@ fn send_blocks(blocks: Vec<SlackBlock>, fallback_text: &str) -> Result<()> {
 
     let status = response.status();
     let body = response.text().unwrap_or_default();
-    debug!("Response status: {}, body: {}", status, body);
     if !status.is_success() {
-        return Err(color_eyre::eyre::eyre!("Slack API error {}: {}", status, body));
+        return Err(color_eyre::eyre::eyre!(
+            "Slack API error {}: {}",
+            status,
+            body
+        ));
     }
 
     Ok(())
