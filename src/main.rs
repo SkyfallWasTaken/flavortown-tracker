@@ -36,7 +36,7 @@ fn main() -> Result<()> {
             }
 
             info!(
-                "Found {} new, {} updated, {} deleted items",
+                "*flavortown updates:* {} new, {} updated, {} deleted items",
                 item_diff.new_items.len(),
                 item_diff.updated_items.len(),
                 item_diff.deleted_items.len()
