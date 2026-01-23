@@ -86,7 +86,7 @@ pub fn upload_to_cdn(image_id: usize, image_url: &Url) -> Result<Url> {
 
     let cdn_url = cell.get_or_try_init(|| {
         let json: CdnResponse = CLIENT
-            .post(&CONFIG.cdn_base_url)
+            .post(CONFIG.cdn_base_url.clone())
             .multipart(form)
             .bearer_auth(&CONFIG.cdn_key)
             .send()?
