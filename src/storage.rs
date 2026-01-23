@@ -2,15 +2,15 @@ use std::fs::{self, File};
 use std::path::Path;
 
 use crate::config::CONFIG;
-use crate::scraper::{CLIENT, ShopItems};
+use crate::scraper::{ShopItems, CLIENT};
 
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::{eyre::eyre, Result};
 use dashmap::DashMap;
 use log::debug;
 use once_cell::sync::Lazy;
 use reqwest::{
-    Url,
     blocking::multipart::{Form, Part},
+    Url,
 };
 use serde::Deserialize;
 use sled::{Config, Db};
@@ -86,9 +86,9 @@ pub fn upload_to_cdn(image_id: usize, image_url: &Url) -> Result<Url> {
 
     let cdn_url = cell.get_or_try_init(|| {
         let json: CdnResponse = CLIENT
-            .post("https://cdn.hackclub.com/api/file")
+            .post(&CONFIG.cdn_base_url)
             .multipart(form)
-            .bearer_auth("beans")
+            .bearer_auth(&CONFIG.cdn_key)
             .send()?
             .error_for_status()?
             .json()?;
