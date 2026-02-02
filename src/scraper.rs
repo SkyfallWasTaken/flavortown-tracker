@@ -79,6 +79,13 @@ pub type ShopItems = Vec<ShopItem>;
 pub type ShopItemId = usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct Accessory {
+    pub id: usize,
+    pub name: String,
+    pub prices: HashMap<Region, u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ShopItem {
     pub title: String,
     pub description: String,
@@ -87,6 +94,13 @@ pub struct ShopItem {
 
     pub image_id: usize,
     pub id: ShopItemId,
+
+    #[serde(default)]
+    pub long_description: Option<String>,
+    #[serde(default)]
+    pub accessories: Vec<Accessory>,
+    #[serde(default)]
+    pub remaining_stock: Option<u32>,
 }
 
 impl ShopItem {
@@ -111,7 +125,7 @@ fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
         .text()
         .collect::<String>()
         .chars()
-        .filter(|c| c.is_ascii_digit())
+        .filter(char::is_ascii_digit)
         .collect::<String>()
         .parse()?;
     let image_url: Url = select_one(&element, "div.shop-item-card__image > img")?
@@ -134,6 +148,9 @@ fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
         image_url,
         image_id,
         prices,
+        long_description: None,
+        accessories: Vec::new(),
+        remaining_stock: None,
     })
 }
 
@@ -144,6 +161,104 @@ fn fetch_shop_page() -> Result<String> {
         .error_for_status()?;
     assert_eq!(res.status(), StatusCode::OK);
     res.text().map_err(Into::into)
+}
+
+fn fetch_item_detail_page(item_id: ShopItemId) -> Result<String> {
+    let url = CONFIG
+        .base_url
+        .join(&format!("shop/order?shop_item_id={item_id}"))?;
+    let res = CLIENT.get(url).send()?.error_for_status()?;
+    assert_eq!(res.status(), StatusCode::OK);
+    res.text().map_err(Into::into)
+}
+
+struct AccessoryDetail {
+    id: usize,
+    name: String,
+    price: u32,
+}
+
+struct ItemDetails {
+    long_description: Option<String>,
+    accessories: Vec<AccessoryDetail>,
+    remaining_stock: Option<u32>,
+}
+
+fn scrape_item_details_for_region(item_id: ShopItemId) -> Result<ItemDetails> {
+    let html = fetch_item_detail_page(item_id)?;
+    let document = Html::parse_document(&html);
+    let root = document.root_element();
+
+    let long_description = select_one(&root, ".markdown-content")
+        .ok()
+        .map(|elem| elem.text().collect::<Vec<_>>().join("").trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let remaining_stock = select_one(&root, ".shop-order__stock-indicator span")
+        .ok()
+        .and_then(|elem| {
+            let text = elem.text().collect::<String>();
+            if text.contains("Out of stock") {
+                Some(0)
+            } else {
+                text.chars()
+                    .filter(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            }
+        });
+
+    let label_selector = Selector::parse(".shop-order__accessory-option-label").unwrap();
+    let input_selector = Selector::parse(".shop-order__accessory-option-input").unwrap();
+    let name_selector = Selector::parse(".shop-order__accessory-option-name").unwrap();
+    let mut accessories = Vec::new();
+
+    for label in document.select(&label_selector) {
+        let input = label.select(&input_selector).next();
+        let name_elem = label.select(&name_selector).next();
+
+        if let (Some(input), Some(name_elem)) = (input, name_elem)
+            && let (Some(id_str), Some(price_str)) = (input.attr("value"), input.attr("data-price"))
+            && let (Ok(id), Ok(price_f)) = (id_str.parse::<usize>(), price_str.parse::<f64>())
+        {
+            let price = price_f as u32;
+            let name = name_elem.text().collect::<String>().trim().to_string();
+            if !accessories.iter().any(|a: &AccessoryDetail| a.id == id) {
+                accessories.push(AccessoryDetail { id, name, price });
+            }
+        }
+    }
+
+    Ok(ItemDetails {
+        long_description,
+        accessories,
+        remaining_stock,
+    })
+}
+
+fn merge_item_details(item: &mut ShopItem, details: ItemDetails, region: &Region) {
+    if item.long_description.is_none() {
+        item.long_description = details.long_description;
+    }
+
+    if item.remaining_stock.is_none() {
+        item.remaining_stock = details.remaining_stock;
+    }
+
+    for detail in details.accessories {
+        if let Some(acc) = item.accessories.iter_mut().find(|a| a.id == detail.id) {
+            acc.prices.insert(region.clone(), detail.price);
+        } else {
+            let mut prices = HashMap::new();
+            prices.insert(region.clone(), detail.price);
+            item.accessories.push(Accessory {
+                id: detail.id,
+                name: detail.name,
+                prices,
+            });
+        }
+    }
 }
 
 fn get_csrf_token() -> Result<String> {
@@ -195,14 +310,26 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
     let csrf_token = get_csrf_token()?;
 
     for region in Region::VARIANTS {
-        debug!("Now scraping {:?}", region);
-        for item in scrape_region(region, &csrf_token)? {
+        debug!("Now scraping {region:?}");
+        let region_items = scrape_region(region, &csrf_token)?;
+
+        for item in &region_items {
             items
                 .entry(item.id)
                 .and_modify(|e| {
                     e.prices.insert(region.clone(), item.prices[region]);
                 })
-                .or_insert(item);
+                .or_insert_with(|| item.clone());
+        }
+
+        let item_ids: Vec<_> = region_items.iter().map(|i| i.id).collect();
+        let details: Vec<_> = item_ids
+            .par_iter()
+            .map(|&id| scrape_item_details_for_region(id).map(|d| (id, d)))
+            .collect::<Result<Vec<_>>>()?;
+
+        for (id, detail) in details {
+            merge_item_details(items.get_mut(&id).unwrap(), detail, region);
         }
     }
 
@@ -210,6 +337,7 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
         .par_iter_mut()
         .try_for_each(|(_, item)| -> Result<()> {
             item.image_url = upload_to_cdn(item.image_id, &item.image_url.clone())?;
+            item.accessories.sort_by_key(|a| a.id);
             Ok(())
         })?;
 

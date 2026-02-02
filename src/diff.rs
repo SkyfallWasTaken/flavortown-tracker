@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::CONFIG;
-use crate::scraper::{Region, ShopItem, ShopItems};
+use crate::scraper::{Accessory, Region, ShopItem, ShopItems};
 use color_eyre::Result;
 use log::{debug, info};
 use slack_morphism::prelude::*;
@@ -16,6 +16,14 @@ const EMOJI_ROBOT: &str = ":robot_face:";
 
 fn prices_changed(old: &HashMap<Region, u32>, new: &HashMap<Region, u32>) -> bool {
     old.len() != new.len() || old.iter().any(|(r, p)| new.get(r) != Some(p))
+}
+
+fn accessories_changed(old: &[Accessory], new: &[Accessory]) -> bool {
+    old != new
+}
+
+fn long_description_changed(old: Option<&String>, new: Option<&String>) -> bool {
+    old != new
 }
 
 fn escape_markdown(text: &str) -> String {
@@ -69,11 +77,56 @@ fn buy_button(url: &impl ToString) -> String {
     format!("<{}|*{EMOJI_TROLLEY} Buy*>", url.to_string())
 }
 
+fn format_accessories(accessories: &[Accessory]) -> String {
+    if accessories.is_empty() {
+        "_none_".to_string()
+    } else {
+        accessories
+            .iter()
+            .map(|a| {
+                format!(
+                    "{} ({EMOJI_COOKIES} {})",
+                    escape_markdown(&a.name),
+                    format_prices_with_flags(&a.prices)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn format_stock(stock: Option<u32>) -> String {
+    match stock {
+        Some(0) => "Out of stock".to_string(),
+        Some(n) => format!("{n} left"),
+        None => "Unlimited".to_string(),
+    }
+}
+
+fn stock_changed(old: Option<u32>, new: Option<u32>) -> bool {
+    old != new
+}
+
+fn format_long_description(desc: Option<&String>) -> String {
+    match desc {
+        Some(s) if !s.is_empty() => {
+            let truncated = if s.len() > 100 {
+                format!("{}...", &s[..100])
+            } else {
+                s.clone()
+            };
+            format!("_{}_", escape_markdown(&truncated))
+        }
+        _ => "_none_".to_string(),
+    }
+}
+
 fn render_new_item(item: &ShopItem) -> Vec<SlackBlock> {
     let section_text = format!(
-        "{}{}\n*Stock:* Unlimited\n\n{}",
+        "{}{}\n*Stock:* {}\n\n{}",
         item_description(&item.description),
         format_price_line(&item.prices),
+        format_stock(item.remaining_stock),
         buy_button(&item.buy_link())
     );
 
@@ -141,8 +194,39 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
         }
     };
 
+    let long_desc_line =
+        if long_description_changed(old.long_description.as_ref(), new.long_description.as_ref()) {
+            format!(
+                "*Long Description:* {} → {}\n",
+                format_long_description(old.long_description.as_ref()),
+                format_long_description(new.long_description.as_ref())
+            )
+        } else {
+            String::new()
+        };
+
+    let accessories_line = if accessories_changed(&old.accessories, &new.accessories) {
+        format!(
+            "*Accessories:* {} → {}\n",
+            format_accessories(&old.accessories),
+            format_accessories(&new.accessories)
+        )
+    } else {
+        String::new()
+    };
+
+    let stock_line = if stock_changed(old.remaining_stock, new.remaining_stock) {
+        format!(
+            "*Stock:* {} → {}\n",
+            format_stock(old.remaining_stock),
+            format_stock(new.remaining_stock)
+        )
+    } else {
+        format!("*Stock:* {}\n", format_stock(new.remaining_stock))
+    };
+
     let section_text = format!(
-        "{description}{price_line}\n*Stock:* Unlimited\n\n{}",
+        "{description}{price_line}\n{long_desc_line}{accessories_line}{stock_line}\n{}",
         buy_button(&new.buy_link())
     );
 

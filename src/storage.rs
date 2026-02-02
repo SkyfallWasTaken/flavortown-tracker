@@ -2,15 +2,15 @@ use std::fs::{self, File};
 use std::path::Path;
 
 use crate::config::CONFIG;
-use crate::scraper::{ShopItems, CLIENT};
+use crate::scraper::{CLIENT, ShopItems};
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use dashmap::DashMap;
 use log::debug;
 use once_cell::sync::Lazy;
 use reqwest::{
-    blocking::multipart::{Form, Part},
     Url,
+    blocking::multipart::{Form, Part},
 };
 use serde::Deserialize;
 use sled::{Config, Db};
@@ -28,7 +28,7 @@ pub fn load_latest_snapshot() -> Result<Option<ShopItems>> {
     }
 }
 
-pub fn write_new_snapshot(items: ShopItems) -> Result<()> {
+pub fn write_new_snapshot(items: &ShopItems) -> Result<()> {
     let ts = time_format::now().unwrap();
     let snap_path = format!(
         "snap_{}.json",

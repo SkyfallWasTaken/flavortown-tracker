@@ -43,11 +43,11 @@ fn main() -> Result<()> {
             );
 
             diff::send_webhook_notifications(&item_diff)?;
-            storage::write_new_snapshot(items)?;
+            storage::write_new_snapshot(&items)?;
         }
         None => {
             warn!("No old snapshot found, writing first snapshot and exiting");
-            storage::write_new_snapshot(items)?;
+            storage::write_new_snapshot(&items)?;
         }
     }
 
