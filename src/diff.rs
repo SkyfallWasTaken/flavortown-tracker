@@ -109,14 +109,7 @@ fn stock_changed(old: Option<u32>, new: Option<u32>) -> bool {
 
 fn format_long_description(desc: Option<&String>) -> String {
     match desc {
-        Some(s) if !s.is_empty() => {
-            let truncated = if s.len() > 100 {
-                format!("{}...", &s[..100])
-            } else {
-                s.clone()
-            };
-            format!("_{}_", escape_markdown(&truncated))
-        }
+        Some(s) if !s.is_empty() => format!("_{}_", escape_markdown(s)),
         _ => "_none_".to_string(),
     }
 }

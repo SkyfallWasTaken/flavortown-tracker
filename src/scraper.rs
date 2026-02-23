@@ -172,19 +172,13 @@ fn fetch_item_detail_page(item_id: ShopItemId) -> Result<String> {
     res.text().map_err(Into::into)
 }
 
-struct AccessoryDetail {
-    id: usize,
-    name: String,
-    price: u32,
-}
-
 struct ItemDetails {
     long_description: Option<String>,
-    accessories: Vec<AccessoryDetail>,
+    accessories: Vec<Accessory>,
     remaining_stock: Option<u32>,
 }
 
-fn scrape_item_details_for_region(item_id: ShopItemId) -> Result<ItemDetails> {
+fn scrape_item_details_for_region(item_id: ShopItemId, region: &Region) -> Result<ItemDetails> {
     let html = fetch_item_detail_page(item_id)?;
     let document = Html::parse_document(&html);
     let root = document.root_element();
@@ -224,8 +218,10 @@ fn scrape_item_details_for_region(item_id: ShopItemId) -> Result<ItemDetails> {
         {
             let price = price_f as u32;
             let name = name_elem.text().collect::<String>().trim().to_string();
-            if !accessories.iter().any(|a: &AccessoryDetail| a.id == id) {
-                accessories.push(AccessoryDetail { id, name, price });
+            if !accessories.iter().any(|a: &Accessory| a.id == id) {
+                let mut prices = HashMap::new();
+                prices.insert(region.clone(), price);
+                accessories.push(Accessory { id, name, prices });
             }
         }
     }
@@ -237,7 +233,7 @@ fn scrape_item_details_for_region(item_id: ShopItemId) -> Result<ItemDetails> {
     })
 }
 
-fn merge_item_details(item: &mut ShopItem, details: ItemDetails, region: &Region) {
+fn merge_item_details(item: &mut ShopItem, details: ItemDetails) {
     if item.long_description.is_none() {
         item.long_description = details.long_description;
     }
@@ -246,17 +242,11 @@ fn merge_item_details(item: &mut ShopItem, details: ItemDetails, region: &Region
         item.remaining_stock = details.remaining_stock;
     }
 
-    for detail in details.accessories {
-        if let Some(acc) = item.accessories.iter_mut().find(|a| a.id == detail.id) {
-            acc.prices.insert(region.clone(), detail.price);
+    for accessory in details.accessories {
+        if let Some(existing) = item.accessories.iter_mut().find(|a| a.id == accessory.id) {
+            existing.prices.extend(accessory.prices);
         } else {
-            let mut prices = HashMap::new();
-            prices.insert(region.clone(), detail.price);
-            item.accessories.push(Accessory {
-                id: detail.id,
-                name: detail.name,
-                prices,
-            });
+            item.accessories.push(accessory);
         }
     }
 }
@@ -325,11 +315,11 @@ pub fn scrape() -> Result<Vec<ShopItem>> {
         let item_ids: Vec<_> = region_items.iter().map(|i| i.id).collect();
         let details: Vec<_> = item_ids
             .par_iter()
-            .map(|&id| scrape_item_details_for_region(id).map(|d| (id, d)))
+            .map(|&id| scrape_item_details_for_region(id, region).map(|d| (id, d)))
             .collect::<Result<Vec<_>>>()?;
 
         for (id, detail) in details {
-            merge_item_details(items.get_mut(&id).unwrap(), detail, region);
+            merge_item_details(items.get_mut(&id).unwrap(), detail);
         }
     }
 
