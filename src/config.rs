@@ -16,6 +16,9 @@ pub struct Config {
     #[serde(default = "default_storage_path")]
     pub storage_path: PathBuf,
     pub sentry_dsn: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub openai_base_url: Option<Url>,
+    pub openai_model: Option<String>,
     #[serde(default = "default_cdn_key")]
     pub cdn_key: String,
     #[serde(default = "default_cdn_base_url")]

@@ -152,6 +152,57 @@ fn render_deleted_item(item: &ShopItem) -> Vec<SlackBlock> {
     ]
 }
 
+fn summarize_long_description_change(
+    item_title: &str,
+    old_desc: Option<&String>,
+    new_desc: Option<&String>,
+) -> Option<String> {
+    let api_key = CONFIG.openai_api_key.as_ref()?;
+    let model = CONFIG.openai_model.as_ref()?;
+    let base_url = CONFIG.openai_base_url.as_ref()?;
+
+    let old_text = old_desc.map(|s| s.as_str()).unwrap_or("(empty)");
+    let new_text = new_desc.map(|s| s.as_str()).unwrap_or("(empty)");
+
+    let prompt = format!(
+        "An item called \"{item_title}\" in a shop had its description changed.\n\n\
+         OLD DESCRIPTION:\n{old_text}\n\n\
+         NEW DESCRIPTION:\n{new_text}\n\n\
+         Write 1-2 sentences summarizing what specifically changed. \
+         Be concrete: mention specific names, numbers, specs, vendors, etc. that were added, removed, or changed. \
+         Do NOT say \"the description was updated\" - say WHAT changed. \
+         Keep it short."
+    );
+
+    let url = format!("{}chat/completions", base_url.as_str().trim_end_matches('/').to_owned() + "/");
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 150,
+        "temperature": 0.3
+    });
+
+    let response = crate::scraper::CLIENT
+        .post(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .ok()?;
+
+    if !response.status().is_success() {
+        log::warn!("OpenAI API returned status {}", response.status());
+        return None;
+    }
+
+    let json: serde_json::Value = response.json().ok()?;
+    json["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+}
+
 fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
     let title = if old.title != new.title {
         format!("{} → {}", old.title, new.title)
@@ -189,11 +240,18 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
 
     let long_desc_line =
         if long_description_changed(old.long_description.as_ref(), new.long_description.as_ref()) {
-            format!(
-                "*Long Description:* {} → {}\n",
-                format_long_description(old.long_description.as_ref()),
-                format_long_description(new.long_description.as_ref())
-            )
+            match summarize_long_description_change(
+                &new.title,
+                old.long_description.as_ref(),
+                new.long_description.as_ref(),
+            ) {
+                Some(s) => format!("*Long Description:* {}\n", escape_markdown(&s)),
+                None => format!(
+                    "*Long Description:* {} → {}\n",
+                    format_long_description(old.long_description.as_ref()),
+                    format_long_description(new.long_description.as_ref())
+                ),
+            }
         } else {
             String::new()
         };
