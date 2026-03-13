@@ -99,7 +99,7 @@ fn format_stock(stock: Option<u32>) -> String {
 fn format_achievement_lock(achievement_lock: Option<String>) -> String {
     match achievement_lock {
         Some(s) if s == "Cooking".to_string() => "_Cooking (Black Market)_".to_string(),
-        Some(s) if !s.is_empty() => format!("_{}_", escape_markdown(s.as_str())),
+        Some(s) if !s.is_empty() => format!("{}", escape_markdown(s.as_str())),
         _ => "_none_".to_string(),
     }
 }
