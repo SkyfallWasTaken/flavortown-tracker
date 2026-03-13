@@ -101,6 +101,7 @@ pub struct ShopItem {
     pub accessories: Vec<Accessory>,
     #[serde(default)]
     pub remaining_stock: Option<u32>,
+    pub achievement_lock: Option<String>,
 }
 
 impl ShopItem {
@@ -151,6 +152,7 @@ fn parse_shop_item(element: ElementRef, region: &Region) -> Result<ShopItem> {
         long_description: None,
         accessories: Vec::new(),
         remaining_stock: None,
+        achievement_lock: None,
     })
 }
 
@@ -176,6 +178,7 @@ struct ItemDetails {
     long_description: Option<String>,
     accessories: Vec<Accessory>,
     remaining_stock: Option<u32>,
+    achievement_lock: Option<String>,
 }
 
 fn scrape_item_details_for_region(item_id: ShopItemId, region: &Region) -> Result<ItemDetails> {
@@ -201,6 +204,19 @@ fn scrape_item_details_for_region(item_id: ShopItemId, region: &Region) -> Resul
                     .parse()
                     .ok()
             }
+        });
+
+    let achievement_lock = select_one(&root, ".shop-order__achievement-requirement")
+        .ok()
+        .map(|elem| {
+            let text = elem.text().collect::<String>();
+            let text = text.trim();
+            text.replace("Unlocked via \"", "")
+                .replace("\" achievement", "")
+                .replace("Requires \"", "")
+                .replace("to purchase", "")
+                .trim()
+                .to_string()
         });
 
     let label_selector = Selector::parse(".shop-order__accessory-option-label").unwrap();
@@ -230,6 +246,7 @@ fn scrape_item_details_for_region(item_id: ShopItemId, region: &Region) -> Resul
         long_description,
         accessories,
         remaining_stock,
+        achievement_lock,
     })
 }
 
@@ -240,6 +257,10 @@ fn merge_item_details(item: &mut ShopItem, details: ItemDetails) {
 
     if item.remaining_stock.is_none() {
         item.remaining_stock = details.remaining_stock;
+    }
+
+    if item.achievement_lock.is_none() {
+        item.achievement_lock = details.achievement_lock;
     }
 
     for accessory in details.accessories {

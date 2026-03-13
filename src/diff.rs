@@ -13,17 +13,10 @@ const EMOJI_NEW: &str = ":new:";
 const EMOJI_TRASH: &str = ":win10-trash:";
 const EMOJI_STAR: &str = ":star:";
 const EMOJI_ROBOT: &str = ":robot_face:";
+const EMOJI_MEDAL: &str = ":tw_medal:";
 
 fn prices_changed(old: &HashMap<Region, u32>, new: &HashMap<Region, u32>) -> bool {
     old.len() != new.len() || old.iter().any(|(r, p)| new.get(r) != Some(p))
-}
-
-fn accessories_changed(old: &[Accessory], new: &[Accessory]) -> bool {
-    old != new
-}
-
-fn long_description_changed(old: Option<&String>, new: Option<&String>) -> bool {
-    old != new
 }
 
 fn escape_markdown(text: &str) -> String {
@@ -103,8 +96,12 @@ fn format_stock(stock: Option<u32>) -> String {
     }
 }
 
-fn stock_changed(old: Option<u32>, new: Option<u32>) -> bool {
-    old != new
+fn format_achievement_lock(achievement_lock: Option<String>) -> String {
+    match achievement_lock {
+        Some(s) if s == "Cooking".to_string() => "_Cooking (Black Market)_".to_string(),
+        Some(s) if !s.is_empty() => format!("_{}_", escape_markdown(s.as_str())),
+        _ => "_none_".to_string(),
+    }
 }
 
 fn format_long_description(desc: Option<&String>) -> String {
@@ -174,7 +171,10 @@ fn summarize_long_description_change(
          Keep it short."
     );
 
-    let url = format!("{}chat/completions", base_url.as_str().trim_end_matches('/').to_owned() + "/");
+    let url = format!(
+        "{}chat/completions",
+        base_url.as_str().trim_end_matches('/').to_owned() + "/"
+    );
 
     let body = serde_json::json!({
         "model": model,
@@ -238,25 +238,24 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
         }
     };
 
-    let long_desc_line =
-        if long_description_changed(old.long_description.as_ref(), new.long_description.as_ref()) {
-            match summarize_long_description_change(
-                &new.title,
-                old.long_description.as_ref(),
-                new.long_description.as_ref(),
-            ) {
-                Some(s) => format!("*Long Description:* {}\n", escape_markdown(&s)),
-                None => format!(
-                    "*Long Description:* {} → {}\n",
-                    format_long_description(old.long_description.as_ref()),
-                    format_long_description(new.long_description.as_ref())
-                ),
-            }
-        } else {
-            String::new()
-        };
+    let long_desc_line = if old.long_description != new.long_description {
+        match summarize_long_description_change(
+            &new.title,
+            old.long_description.as_ref(),
+            new.long_description.as_ref(),
+        ) {
+            Some(s) => format!("*Long Description:* {}\n", escape_markdown(&s)),
+            None => format!(
+                "*Long Description:* {} → {}\n",
+                format_long_description(old.long_description.as_ref()),
+                format_long_description(new.long_description.as_ref())
+            ),
+        }
+    } else {
+        String::new()
+    };
 
-    let accessories_line = if accessories_changed(&old.accessories, &new.accessories) {
+    let accessories_line = if old.accessories != new.accessories {
         format!(
             "*Accessories:* {} → {}\n",
             format_accessories(&old.accessories),
@@ -266,7 +265,7 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
         String::new()
     };
 
-    let stock_line = if stock_changed(old.remaining_stock, new.remaining_stock) {
+    let stock_line = if old.remaining_stock != new.remaining_stock {
         format!(
             "*Stock:* {} → {}\n",
             format_stock(old.remaining_stock),
@@ -276,8 +275,21 @@ fn render_updated_item(old: &ShopItem, new: &ShopItem) -> Vec<SlackBlock> {
         format!("*Stock:* {}\n", format_stock(new.remaining_stock))
     };
 
+    let achievement_line = if old.achievement_lock != new.achievement_lock {
+        format!(
+            "{EMOJI_MEDAL} *Requires achievement:* {} → {}\n",
+            format_achievement_lock(old.achievement_lock.clone()),
+            format_achievement_lock(new.achievement_lock.clone())
+        )
+    } else {
+        format!(
+            "{EMOJI_MEDAL} *Requires achievement:* {}\n",
+            format_achievement_lock(new.achievement_lock.clone())
+        )
+    };
+
     let section_text = format!(
-        "{description}{price_line}\n{long_desc_line}{accessories_line}{stock_line}\n{}",
+        "{description}{price_line}\n{long_desc_line}{accessories_line}{stock_line}{achievement_line}\n{}",
         buy_button(&new.buy_link())
     );
 
